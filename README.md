@@ -23,8 +23,8 @@ This project builds a deep learning **regression model** that estimates pediatri
 
 > **Note:** The original Kaggle test CSV does not include ground-truth bone age labels, so the test set used for evaluation here is carved out from the training dataset using an 80/10/10 split via `train_test_split`.
 
-### Figure 4 — Sample Hand X-Ray (Training Set)
-![Sample Hand X-Ray](Figure_4_Sample_XRay.png)
+### Figure 1 — Sample Hand X-Ray (Training Set)
+![Sample Hand X-Ray](Images/Sample_Hand_XRay.png)
 
 > A representative grayscale hand radiograph from the training dataset. The model learns to estimate bone age from structural cues such as bone density, growth plate width, and carpal bone development visible in images like this.
 
@@ -114,8 +114,8 @@ Applied **only to training data** via `ImageDataGenerator`. Validation and test 
 > EarlyStopping triggered at **epoch 16** (patience=5, best val_loss at epoch 11: **277.54 MSE**)  
 > Best model restored automatically via `restore_best_weights=True`
 
-### Figure 5 — Prediction Results on Test Set
-![Prediction Results](Figure_5_Prediction_Results.png)
+### Figure 2 — Prediction Results on Test Set
+![Prediction Results](Images/Prediction_Results.png)
 
 > Six test samples selected at equal intervals across the age spectrum (youngest to oldest). Each panel shows the hand X-ray alongside the real bone age and the model's predicted value (in months). Performance is strongest in the mid-range ages and weakest at the extremes — a common pattern in regression models trained on imbalanced age distributions.
 
