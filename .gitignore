@@ -1,0 +1,35 @@
+# Veri Setleri (Datasets)
+bonage_dataset/
+*.zip
+*.rar
+*.tar.gz
+
+# Python & Sanal Ortamlar
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+/lib/
+/bin/
+/include/
+
+# Model Ağırlıkları ve Çıktılar
+*.h5
+*.keras
+*.weights
+checkpoint/
+logs/
+
+# IDE & Editörler (PyCharm, VS Code)
+.idea/
+.vscode/
+*.swp
+*.suo
+
+# İşletim Sistemi Çıktıları
+.DS_Store
+Thumbs.db
+desktop.ini
