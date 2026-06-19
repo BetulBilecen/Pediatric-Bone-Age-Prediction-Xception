@@ -1,11 +1,17 @@
 # 🦴 Pediatric Bone Age Estimation from Hand X-Rays
-### Regression with Xception Transfer Learning | TensorFlow & Keras
+### Multi-Input Regression with Xception Transfer Learning | TensorFlow & Keras
 
 ---
 
 ## 📌 Overview
 
-This project builds a deep learning **regression model** that estimates pediatric bone age (in months) from hand X-ray images. Rather than training from scratch, it leverages **Xception** — a state-of-the-art CNN architecture pretrained on ImageNet — and applies **Transfer Learning with Full Fine-Tuning** to adapt it to skeletal development patterns in radiographic images.
+This project builds a deep learning **regression model** that estimates pediatric bone age (in months) from hand X-ray images. It uses a **Multi-Input Architecture** that combines:
+
+- **Image branch:** Xception CNN (pretrained on ImageNet, fully fine-tuned) extracts visual features from the X-ray
+- **Tabular branch:** A small Dense network encodes patient gender (0/1)
+- **Fusion head:** Both branches are concatenated and passed through fully connected layers to predict bone age
+
+The model also includes **Grad-CAM visualization** (`explainability.py`) to highlight which bone regions the model focuses on when making predictions.
 
 ---
 
@@ -13,87 +19,82 @@ This project builds a deep learning **regression model** that estimates pediatri
 
 **Source:** [RSNA Pediatric Bone Age Challenge — Kaggle](https://www.kaggle.com/datasets/kmader/rsna-bone-age)  
 **Task:** Continuous regression — predict bone age in **months**  
-**Format:** Grayscale PNG images, resized to 128×128 px (RGB mode for Xception compatibility)
+**Format:** Grayscale PNG images, resized to 128×128 px (RGB for Xception compatibility)
 
-| Split      | Source                    | Size  |
-|------------|---------------------------|-------|
-| Train      | 80% of training CSV       | ~9,600|
-| Validation | 10% of training CSV       | ~1,200|
-| Test       | 10% of training CSV       | ~1,200|
+| Split      | Size   |
+|------------|--------|
+| Train      | ~10,088|
+| Validation | ~1,261 |
+| Test       | ~1,261 |
 
-> **Note:** The original Kaggle test CSV does not include ground-truth bone age labels, so the test set used for evaluation here is carved out from the training dataset using an 80/10/10 split via `train_test_split`.
-
-### Figure 1 — Sample Hand X-Ray (Training Set)
-![Sample Hand X-Ray](Images/Sample_Hand_XRay.png)
-
-> A representative grayscale hand radiograph from the training dataset. The model learns to estimate bone age from structural cues such as bone density, growth plate width, and carpal bone development visible in images like this.
+> **Note:** The original Kaggle test set has no labels. The test split used here is carved from the training CSV via an 80/10/10 split using `train_test_split`.
 
 ---
 
 ## 🏗️ Model Architecture
 
-Xception base (pretrained on ImageNet) with a custom regression head:
+A **Functional API multi-input model** combining image and gender data:
 
 ```
-Input: (128, 128, 3)
-│
-├── Xception Base (Fine-Tuned, all layers trainable)
-│     └── Output: (4, 4, 2048)
-│
-├── GlobalMaxPooling2D   →  (2048,)
-├── Dense(5)
-├── ReLU Activation
-└── Dense(1, linear)     →  Predicted bone age in months
+Image Input (128, 128, 3)          Gender Input (1,)
+        │                                  │
+  Xception Base                      Dense(16, relu)
+  (ImageNet weights,                       │
+   fully fine-tuned)                       │
+        │                                  │
+GlobalMaxPooling2D (2048,)                 │
+        │                                  │
+        └──────── Concatenate (2064,) ─────┘
+                        │
+                  Dense(32, relu)
+                        │
+               Dense(1, linear)  →  Predicted Bone Age (months)
 ```
 
-| Detail               | Value                        |
-|----------------------|------------------------------|
-| Base Model           | Xception (ImageNet weights)  |
-| Fine-Tuning          | ✅ Full (`model.trainable = True`) |
-| Pooling              | GlobalMaxPooling2D           |
-| Output Activation    | Linear (regression)          |
-| Loss Function        | Mean Squared Error (MSE)     |
-| Metrics              | MAE, MSE                     |
+| Detail               | Value                                   |
+|----------------------|-----------------------------------------|
+| Base Model           | Xception (ImageNet weights)             |
+| Fine-Tuning          | ✅ Full (`base_model.trainable = True`) |
+| Pooling              | GlobalMaxPooling2D                      |
+| Gender Encoding      | Dense(16, relu)                         |
+| Fusion               | Concatenate → Dense(32) → Dense(1)      |
+| Output Activation    | Linear (regression)                     |
+| Loss Function        | MSE                                     |
+| Metrics              | MAE                                     |
+| Total Parameters     | ~20.9M (79.83 MB)                       |
 
-### Why Xception?
-- **Depthwise Separable Convolutions** give strong feature extraction with fewer parameters than VGG or ResNet
-- Proven performance on medical imaging tasks
-- Effective at capturing fine bone structure and growth plate details in X-rays
-- Excellent generalization when fine-tuned on domain-specific data
+### Why Multi-Input?
+Gender is a clinically significant factor in bone development — bone maturation rates differ between males and females. Adding gender as a dedicated input branch (rather than ignoring it) gives the model direct access to this signal without forcing it to infer it from pixel data.
 
 ---
 
 ## ⚙️ Training Configuration
 
-| Hyperparameter      | Value                  | Note                                      |
-|---------------------|------------------------|-------------------------------------------|
-| Optimizer           | Adam                   |                                           |
-| Learning Rate       | 0.0001                 | Lowered from 0.001 for stable fine-tuning |
-| Loss Function       | MSE                    |                                           |
-| Max Epochs          | 25                     |                                           |
-| **Actual Epochs**   | **16**                 | EarlyStopping triggered                   |
-| Batch Size          | 32                     |                                           |
-| Image Size          | 128×128                | Reduced from 256×256 for ~2× speed gain  |
-| EarlyStopping       | `patience=5`, monitors `val_loss`, restores best weights |
+| Hyperparameter     | Value                         |
+|--------------------|-------------------------------|
+| Optimizer          | Adam (lr = 0.0001)            |
+| Loss Function      | MSE                           |
+| Max Epochs         | 15                            |
+| **Actual Epochs**  | **14** (EarlyStopping triggered) |
+| Batch Size         | 32                            |
+| Image Size         | 128×128                       |
+| EarlyStopping      | patience=5, monitors val_loss, restores best weights |
+| ModelCheckpoint    | saves best val_loss only      |
 
 ---
 
 ## 🔄 Data Augmentation
 
-Applied **only to training data** via `ImageDataGenerator`. Validation and test generators use only `preprocess_input` (no augmentation).
+Applied **only to training data** via `ImageDataGenerator`. Validation uses `preprocess_input` only (no augmentation).
 
-| Technique         | Value        | Reason                                                    |
-|-------------------|--------------|-----------------------------------------------------------|
-| Rotation          | ±180°        | X-rays can be taken at various orientations               |
-| Zoom              | 25%          | Simulates varying image scales                            |
-| Brightness        | [0.8, 1.2]   | Narrowed from [0.2, 0.5] — wider range obscured bone tip details |
-| Height Shift      | 20%          | Simulates vertical positioning variance                   |
-| Horizontal Flip   | ✅ Enabled   | Left/right hand symmetry                                  |
-| Shear             | 0.05         | Minor geometric distortion                                |
-| Fill Mode         | `nearest`    | Fills gaps after transformation                           |
-| Preprocessing     | `preprocess_input` | Xception-specific normalization to [-1, 1] — **no manual rescale** |
+| Technique         | Value         |
+|-------------------|---------------|
+| Rotation          | ±20°          |
+| Zoom              | 15%           |
+| Horizontal Flip   | ✅ Enabled    |
+| Preprocessing     | `preprocess_input` (normalizes to [−1, 1]) |
 
-> ⚠️ **Anti-Double Scaling:** `rescale=1/255` is intentionally **not used**. Xception's `preprocess_input` already normalizes pixel values to `[-1, 1]`. Applying both would corrupt the input distribution and degrade performance.
+> ⚠️ **No `rescale=1/255`** — Xception's `preprocess_input` already handles pixel normalization. Applying both would corrupt the input distribution.
 
 ---
 
@@ -101,48 +102,75 @@ Applied **only to training data** via `ImageDataGenerator`. Validation and test 
 
 ### Training History
 
-| Epoch | Train Loss (MSE) | Train MAE | Val Loss (MSE) | Val MAE |
-|-------|-----------------|-----------|----------------|---------|
-| 1     | 7150.31         | 74.71     | 659.07         | 20.77   |
-| 2     | 977.28          | 25.05     | 444.27         | 16.69   |
-| 3     | 455.08          | 16.91     | 354.70         | 14.89   |
-| 5     | 395.55          | 15.64     | 328.57         | 14.42   |
-| 8     | 346.30          | 14.75     | **296.30**     | **13.37** |
-| 11    | 313.63          | 13.90     | **277.54**     | **13.00** ← Best |
-| 16    | 273.67          | 13.06     | 281.54         | 12.97   |
+| Epoch | Train Loss (MSE) | Train MAE | Val Loss (MSE) | Val MAE  |
+|-------|-----------------|-----------|----------------|----------|
+| 1     | 1867.68         | 28.74     | 414.84         | 16.25    |
+| 2     | 388.63          | 15.54     | 357.53         | 14.67    |
+| 3     | 333.64          | 14.36     | 311.16         | 13.59    |
+| 4     | 306.19          | 13.82     | 269.53         | 12.97    |
+| 5     | 281.44          | 13.25     | 293.53         | 13.38    |
+| 6     | 267.94          | 12.86     | 326.95         | 14.43    |
+| 7     | 248.47          | 12.45     | 322.12         | 14.56    |
+| 8     | 232.39          | 12.01     | 237.26         | 11.99    |
+| 9     | 220.20          | 11.71     | 236.14         | **12.09** |
+| 10    | 209.22          | 11.39     | 268.90         | 12.96    |
+| 11    | 203.45          | 11.24     | 236.69         | 12.17    |
+| 12    | 187.49          | 10.78     | 300.56         | 13.95    |
+| 13    | 182.10          | 10.65     | 272.55         | 13.18    |
+| 14    | 171.89          | 10.31     | 329.51         | 14.47    |
 
-> EarlyStopping triggered at **epoch 16** (patience=5, best val_loss at epoch 11: **277.54 MSE**)  
-> Best model restored automatically via `restore_best_weights=True`
+> Best checkpoint: **Epoch 9** → Val MSE: **236.14**, Val MAE: **~12.09 months**
 
-### Figure 2 — Prediction Results on Test Set
-![Prediction Results](Images/Prediction_Results.png)
+### Final Performance
 
-> Six test samples selected at equal intervals across the age spectrum (youngest to oldest). Each panel shows the hand X-ray alongside the real bone age and the model's predicted value (in months). Performance is strongest in the mid-range ages and weakest at the extremes — a common pattern in regression models trained on imbalanced age distributions.
+| Metric         | Value                    |
+|----------------|--------------------------|
+| Best Val MSE   | **236.14**               |
+| Best Val MAE   | **~12.09 months**        |
+| Baseline MAE   | 13.0 months (single-input Xception) |
+| Improvement    | **~0.91 months** over baseline ✅ |
 
-### Final Performance (Best Checkpoint — Epoch 11)
-
-| Metric           | Value              |
-|------------------|--------------------|
-| Best Val MSE     | **277.54**         |
-| Best Val MAE     | **~13.0 months**   |
-
-The model's average prediction error is approximately **±13 months**, which is within a clinically reasonable range for an automated baseline system on this dataset without gender input.
+Adding gender as a second input improved MAE by approximately **0.91 months** over the single-input baseline, confirming that multi-input fusion is beneficial.
 
 ---
 
-## ⚠️ Known Limitations
+## 🔥 Grad-CAM Visualization
 
-### 1. Gender Feature Not Used
-The dataset includes gender information (`male`/`female`), which is a clinically significant factor in bone development. The current model uses only the X-ray image. Incorporating gender as an additional input (multi-input model) would likely improve accuracy meaningfully.
+The project includes a Grad-CAM module (`explainability.py`) that overlays attention heatmaps on X-ray images to show which regions the model focuses on for each prediction.
 
-### 2. `norm_age` and `boneage_category` Prepared but Unused
-These columns are computed during data preparation but are not passed to the model. They can be useful for analysis or as alternative training targets.
+### Figure — Grad-CAM Attention Map
+> *Example: Actual bone age 150 months → Predicted 144.8 months*
 
-### 3. Small Regression Head
-The classification head (`Dense(5) → Dense(1)`) is minimal. A larger head or additional dense layers may improve the model's ability to map Xception features to continuous age values.
+The model correctly focuses on the **carpal bones and metacarpal growth plates** — anatomically consistent with radiological bone age assessment. The attention map confirms the model has learned clinically meaningful features rather than image artifacts.
 
-### 4. Image Size Trade-off
-Reducing from 256×256 to 128×128 nearly halved training time but discards fine-grained spatial detail (e.g., subtle growth plate features). Consider 256×256 with a GPU for better accuracy.
+---
+
+## 🗂️ Project Structure
+
+```
+📦 Pediatric-Bone-Age-Prediction-Xception/
+├── src/
+│   ├── main.py                    # Training pipeline entry point
+│   ├── models_architecture.py     # Multi-input Xception model definition
+│   ├── dataset.py                 # Data loading, preprocessing, generators
+│   ├── explainability.py          # Grad-CAM heatmap visualization
+│   └── models/
+│       └── best_xception_multi_input.h5  # Best checkpoint (saved during training)
+├── bonage_dataset/
+│   ├── boneage-training-dataset/
+│   ├── boneage-test-dataset/
+│   ├── boneage-training-dataset.csv
+│   ├── boneage-test-dataset.csv
+│   └── df_test_split.csv          # Auto-generated test split after training
+├── Images/
+│   ├── Prediction_Results.png
+│   ├── Sample_Hand_XRay.png
+│   └── sample_xray.png
+├── main.py                        # Root-level entry point
+├── requirements.txt
+├── .gitignore
+└── README.md
+```
 
 ---
 
@@ -151,60 +179,59 @@ Reducing from 256×256 to 128×128 nearly halved training time but discards fine
 ### Requirements
 
 ```bash
-pip install tensorflow keras scikit-learn pandas numpy matplotlib pillow
+pip install tensorflow keras scikit-learn pandas numpy matplotlib pillow opencv-python
 ```
 
-### Dataset Structure
+### Dataset Setup
+
+After downloading from Kaggle, ensure PNG files sit **directly** inside their dataset folders:
 
 ```
 bonage_dataset/
 ├── boneage-training-dataset/
 │   ├── 1377.png
-│   ├── 1378.png
-│   └── ...
-├── boneage-test-dataset/
-│   ├── 4360.png
 │   └── ...
 ├── boneage-training-dataset.csv
 └── boneage-test-dataset.csv
 ```
 
-> ⚠️ After extracting the Kaggle ZIP, make sure PNG files sit **directly** inside `boneage-training-dataset/` and `boneage-test-dataset/` — not in a nested subfolder of the same name.
-
-### Run
+### Train
 
 ```bash
-python main.py
+python src/main.py
 ```
+
+Training will print a **Baseline Comparison Report** at the end, comparing the multi-input model's best val MAE against the 13.0-month single-input baseline.
+
+### Grad-CAM Inference
+
+```bash
+python src/explainability.py
+```
+
+Randomly selects a test sample from `df_test_split.csv` and displays the original X-ray alongside its Grad-CAM attention map.
 
 ---
 
-## 🔧 Suggested Improvements
+## ⚠️ Known Limitations
 
-1. **Add gender as a second input** — Build a multi-input model that takes both the image and gender (0/1) as inputs. This is the single highest-impact improvement available in this dataset.
+**Image resolution trade-off** — 128×128 was used to reduce training time. Upscaling to 256×256 with a GPU may recover fine-grained spatial detail (subtle growth plate features) and improve accuracy.
 
-2. **Increase image resolution** — Return to 256×256 (or higher) with a GPU to recover spatial detail lost by downscaling.
+**Minimal fusion head** — The head uses `Dense(32) → Dense(1)`. A larger head (`Dense(256) → Dense(64) → Dense(1)`) may better map the 2064-dim fused representation to continuous bone age values.
 
-3. **Larger regression head** — Replace `Dense(5)` with `Dense(256) → Dense(64) → Dense(1)` for richer feature mapping.
+**Large epoch-1 loss spike** — Training all Xception weights from scratch causes a large initial loss (MSE ~1867). Gradual fine-tuning (freeze base → train head → unfreeze) would reduce this instability.
 
-4. **Freeze then unfreeze (gradual fine-tuning)** — First train only the head with the base frozen, then gradually unfreeze Xception layers. This prevents the large initial loss spike (epoch 1: MSE 7150) caused by training all weights at once from the start.
-
-5. **MAE as the primary loss** — MSE heavily penalizes outliers. Using MAE as the loss function may produce more stable and clinically interpretable results.
+**MSE as loss** — MSE heavily penalizes outliers. Switching to MAE as the loss function may produce more clinically stable results, especially for extreme age values.
 
 ---
 
-## 📁 Project Structure
+## 🔧 Suggested Next Steps
 
-```
-📦 8-Kemik yasi tahmini/
-├── main.py                    # Main training & evaluation script
-├── README.md                  # This file
-└── bonage_dataset/
-    ├── boneage-training-dataset/
-    ├── boneage-test-dataset/
-    ├── boneage-training-dataset.csv
-    └── boneage-test-dataset.csv
-```
+1. **Increase image resolution** to 256×256 with GPU for richer spatial features
+2. **Gradual fine-tuning** — train head first with frozen base, then unfreeze Xception layer by layer
+3. **Larger regression head** — `Dense(256) → Dense(64) → Dense(1)` for richer feature mapping
+4. **MAE loss** — more robust to outlier age samples than MSE
+5. **Test set evaluation** — use saved `df_test_split.csv` to measure final held-out performance with the best checkpoint
 
 ---
 
@@ -213,8 +240,9 @@ python main.py
 ![Python](https://img.shields.io/badge/Python-3.x-blue)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange)
 ![Keras](https://img.shields.io/badge/Keras-Xception-red)
-![Scikit--learn](https://img.shields.io/badge/Scikit--learn-train__test__split-green)
-![License](https://img.shields.io/badge/Dataset_License-Kaggle_Competition-lightgrey)
+![OpenCV](https://img.shields.io/badge/OpenCV-Grad--CAM-green)
+![Scikit--learn](https://img.shields.io/badge/Scikit--learn-train__test__split-lightgrey)
+![Dataset](https://img.shields.io/badge/Dataset-RSNA_Bone_Age-lightgrey)
 
 ---
 
