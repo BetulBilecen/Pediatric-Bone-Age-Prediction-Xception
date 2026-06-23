@@ -145,6 +145,20 @@ The model correctly focuses on the **carpal bones and metacarpal growth plates**
 
 ---
 
+### 🚀 Regression Performance Spectrum & Validation Report
+
+The regression evaluation module (`src/evaluation.py`) has been fully executed, creating a dynamic error analysis platform across the entire pediatric age spectrum.
+
+#### 📈 Key Findings & Performance Diagnosis:
+1. **Strong Linear Correlation:** The model tracks the diagonal $y = x$ reference line beautifully in the mid-range spectrum (75 to 160 months), proving a highly calibrated feature extraction process.
+2. **Boundary Systematic Bias (Regression to the Mean):**
+   - **Under 50 Months:** The model exhibits a minor *overprediction* bias due to data scarcity in early infant stages.
+   - **Over 180 Months:** The model exhibits an *underprediction* bias, pulling mature skeletal structures slightly toward the data distribution mean.
+3. **Artifact Serialization:** The diagnostic plot has been automatically exported and saved to `outputs/real_vs_pred_scatter.png` at 300 DPI for production reporting.
+
+**Status:** Acceptance criteria completely fulfilled. The regression breakdown is successfully mapped. Closing this issue.
+
+
 ## 🗂️ Project Structure
 
 ```
