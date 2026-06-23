@@ -1,7 +1,6 @@
 # --------------------------------------------------------------
 # KÜTÜPHANELERİN YÜKLENMESİ (IMPORT LIBRARIES)
 # --------------------------------------------------------------
-import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,18 +9,18 @@ import tensorflow as tf
 from keras.preprocessing.image import load_img, img_to_array
 from keras.applications.xception import preprocess_input
 from src.models_architecture import build_multi_input_model
+from pathlib import Path
 
 # --------------------------------------------------------------
 # DOSYA YOLLARI — ANA DİZİNE KİLİTLENME (ABSOLUTE BASE PATH)
 # --------------------------------------------------------------
-current_file_path = os.path.abspath(__file__)
+current_file_path = Path(__file__).resolve()
 
 # Projenin  kök dizinine ulaşana kadar üst klasörlere çıkma
-BASE_DIRECTION = current_file_path
-while os.path.basename(BASE_DIRECTION) != "Pediatric-Bone-Age-Prediction-Xception":     BASE_DIRECTION = os.path.dirname(BASE_DIRECTION)
-DATA_DIRECTION = os.path.join(BASE_DIRECTION, "bonage_dataset")
-MODELS_DIRECTION = os.path.join(BASE_DIRECTION, "src", "models")
-checkpoint_path = os.path.join(MODELS_DIRECTION, "best_xception_multi_input.h5")
+BASE_DIRECTORY = current_file_path.parent.parent
+DATA_DIRECTORY = BASE_DIRECTORY / "bonage_dataset"
+MODELS_DIRECTORY = BASE_DIRECTORY / "src"/ "models"
+checkpoint_path = MODELS_DIRECTORY / "best_xception_multi_input.h5"
 
 # --------------------------------------------------------------
 # GRAD-CAM ALGORİTMASININ TANIMLANMASI (GRAD-CAM HEATMAP)
@@ -38,10 +37,10 @@ def make_gradcam_heatmap(img_array, gender_data, model, last_conv_layer_name):
     # Yapılacak işlemleri izlemek ve sonrasında gradyan hesabı için GradientTape başlatma
     with tf.GradientTape() as G_tape:
         last_conv_layer_output, preds = grad_model([img_array, gender_data])
-        class_chanel = preds[:, 0]
+        class_channel = preds[:, 0]
 
     # Tahminin son konvolüsyon katmanına göre gradyanlarını hesapla
-    grads = G_tape.gradient(class_chanel, last_conv_layer_output)
+    grads = G_tape.gradient(class_channel, last_conv_layer_output)
 
     # Her bir özellik haritasının gradyan ağırlığını (önem derecesini) hesaplama
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
@@ -61,7 +60,7 @@ def make_gradcam_heatmap(img_array, gender_data, model, last_conv_layer_name):
 # --------------------------------------------------------------
 # Resmi OpenCV ile okuyup oluşturulan ısı haritasını röntgen görüntüsü üzerine yerleştirme
 def generate_and_display_gradcam(img_path, gender_val, actual_age, model_path):
-    if not os.path.exists(model_path):
+    if not model_path.exists():
         print(f"[ERROR] Trained model file not found! Please wait for training to complete: {model_path}")
         return
 
@@ -128,7 +127,7 @@ def visualize_gradcam_results(orig_img, actual_age, predicted_age, superimposed_
 # MODEL TAHMİNİ VE PIPELINE TETİKLEME (EXECUTION PIPELINE)
 # --------------------------------------------------------------
 def generate_and_visualize_gradcam(img_path, gender_val, actual_age, model_path):
-    if not os.path.exists(model_path):
+    if not model_path.exists():
         print(f"[ERROR] Trained model file not found! Please wait for training to complete: {model_path}")
         return
 
@@ -143,9 +142,9 @@ def generate_and_visualize_gradcam(img_path, gender_val, actual_age, model_path)
 # TEST SELEKSİYONU VE TETİKLEME (MAIN EXECUTION)
 # --------------------------------------------------------------
 if __name__ == "__main__":
-    test_split_path = os.path.join(DATA_DIRECTION, "df_test_split.csv")
+    test_split_path = DATA_DIRECTORY / "df_test_split.csv"
 
-    if os.path.exists(test_split_path):
+    if test_split_path.exists():
         df_test = pd.read_csv(test_split_path)
         sample = df_test.sample(n=1, random_state=42).iloc[0]
 
