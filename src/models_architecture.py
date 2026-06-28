@@ -2,7 +2,7 @@
 # KÜTÜPHANELERİN YÜKLENMESİ (IMPORT LIBRARIES)
 # --------------------------------------------------------------
 import tensorflow as tf
-from keras.layers import Input, Dense, GlobalMaxPooling2D, Concatenate
+from keras.layers import Input, Dense, GlobalAveragePooling2D, Concatenate
 from keras.models import Model
 from keras.optimizers import Adam
 
@@ -20,7 +20,7 @@ def build_multi_input_model(img_size):
     )
     base_model.trainable = True  # Fine-tuning için açık bırakıyoruz
 
-    x = GlobalMaxPooling2D()(base_model.output)
+    x = GlobalAveragePooling2D()(base_model.output)
 
     # 2. Girdi Kolu: Tabular Cinsiyet Verisi
     gender_input = Input(shape=(1,), name="gender_input")

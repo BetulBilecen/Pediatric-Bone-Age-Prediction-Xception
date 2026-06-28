@@ -4,7 +4,7 @@
 import os
 from src.dataset import prepare_data
 from src.models_architecture import build_multi_input_model
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 # --------------------------------------------------------------
 # SABİTLER VE HİPERPARAMETRELER (CONSTANTS & HYPERPARAMETERS)
 # --------------------------------------------------------------
@@ -12,33 +12,29 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 # Sabitler
 IMG_SIZE = (128,128)
 BATCH_SIZE = 32
-EPOCHS = 15
-BASELINE_MAE_SCORE = 13.0 # Ay bazında baseline skoru
+EPOCHS = 30
+BASELINE_MAE_SCORE = 13.0   # Ay bazında baseline skoru
 
 # Dosya yolları
-CURRENT_DIRECTION = os.path.dirname(os.path.abspath(__file__))
+CURRENT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
 # Ana proje klasörünü bulana kadar geriye git
-BASE_DIR = CURRENT_DIRECTION
-while os.path.basename(BASE_DIR) != "Pediatric-Bone-Age-Prediction-Xception":
-    BASE_DIR = os.path.dirname(BASE_DIR)
+BASE_DIRECTORY = CURRENT_DIRECTORY
+while os.path.basename(BASE_DIRECTORY) != "Pediatric-Bone-Age-Prediction-Xception":
+    BASE_DIRECTORY = os.path.dirname(BASE_DIRECTORY)
 
-DATA_DIRECTION = os.path.join(BASE_DIR, "bonage_dataset")
-MODELS_DIRECTION = os.path.join(BASE_DIR, "src", "models")
+DATA_DIRECTORY = os.path.join(BASE_DIRECTORY, "bonage_dataset")
+MODELS_DIRECTORY = os.path.join(BASE_DIRECTORY, "src", "models")
 
 # Klasör kontrolü
-os.makedirs(MODELS_DIRECTION, exist_ok=True)
-checkpoint_path = os.path.join(MODELS_DIRECTION, "best_boneage_model.keras")
-
-# "models" klasörü yoksa oluştur
-os.makedirs(MODELS_DIRECTION, exist_ok=True)
-checkpoint_path = os.path.join(MODELS_DIRECTION, "best_xception_multi_input.h5")
+os.makedirs(MODELS_DIRECTORY, exist_ok=True)
+checkpoint_path = os.path.join(MODELS_DIRECTORY, "best_xception_multi_input.h5")
 
 # --------------------------------------------------------------
 # VERİ JENERATÖRLERİNİN HAZIRLANMASI (DATA GENERATORS)
 # --------------------------------------------------------------
 print("[INFO] Loading datasets and preparing the multi-input data pipeline...")
-train_gen, val_gen, num_train, num_val, df_test = prepare_data(DATA_DIRECTION, IMG_SIZE, BATCH_SIZE)
+train_gen, val_gen, num_train, num_val, df_test = prepare_data(DATA_DIRECTORY, IMG_SIZE, BATCH_SIZE)
 
 # ----------------------------------------------------------------------------
 # MULTI-INPUT MODELİNİN İNŞA EDİLMESİ (MODEL ARCHITECTURE)
@@ -53,7 +49,7 @@ model.summary()
 callbacks = [
     EarlyStopping(
         monitor= "val_loss",
-        patience= 5,
+        patience= 8,
         restore_best_weights= True
     ),
 
@@ -61,6 +57,13 @@ callbacks = [
         filepath= checkpoint_path,
         monitor= "val_loss",
         save_best_only= True
+    ),
+
+    ReduceLROnPlateau(
+        monitor= "val_loss",
+        factor= 0.5,
+        patience= 3,
+        min_lr= 1e-6
     )
 ]
 
@@ -80,7 +83,7 @@ history = model.fit(
 # ----------------------------------------------------------------------------
 # TEST VERİSİNİN SAKLANMASI (SAVING TEST SPLIT)
 # ----------------------------------------------------------------------------
-df_test.to_csv(os.path.join(DATA_DIRECTION, "df_test_split.csv"), index= False)
+df_test.to_csv(os.path.join(DATA_DIRECTORY, "df_test_split.csv"), index= False)
 print(f"\n[SUCCESS] Training completed. Best model checkpoint saved to: {checkpoint_path}")
 
 # ------------------------------------------------------------

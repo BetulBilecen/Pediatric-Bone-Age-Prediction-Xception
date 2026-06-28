@@ -1,35 +1,46 @@
-# Veri Setleri (Datasets)
+# --------------------------------------------------------------
+# VERİ SETLERİ (DATASETS)
+# --------------------------------------------------------------
 bonage_dataset/
+outputs/gradcam_results/temp_shifted_*
 *.zip
 *.rar
 *.tar.gz
 
-# Python & Sanal Ortamlar
+
+# --------------------------------------------------------------
+# PYTHON & SANAL ORTAMLAR (PYTHON & VIRTUAL ENVIRONMENTS)
+# --------------------------------------------------------------
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 .venv/
 venv/
 env/
-/lib/
-/bin/
-/include/
+ENV/
 
-# Model Ağırlıkları ve Çıktılar
+# --------------------------------------------------------------
+# MODEL AĞIRLIKLARI VE ÇIKTILARI (MODEL WEIGHTS & CHECKPOINTS)
+# --------------------------------------------------------------
 *.h5
 *.keras
 *.weights
 checkpoint/
-logs/
+src/models/
+df_test_split.csv
 
-# IDE & Editörler (PyCharm, VS Code)
+# --------------------------------------------------------------
+# IDE & EDİTÖRLER (IDE & EDITORS)
+# --------------------------------------------------------------
 .idea/
 .vscode/
 *.swp
+*.swo
 *.suo
 
-# İşletim Sistemi Çıktıları
+# --------------------------------------------------------------
+# İŞLETİM SİSTEMİ ÇIKTILARI (OS-GENERATED FILES)
+# --------------------------------------------------------------
 .DS_Store
 Thumbs.db
 desktop.ini

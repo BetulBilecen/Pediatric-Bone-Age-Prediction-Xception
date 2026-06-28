@@ -11,21 +11,21 @@ This project builds a deep learning **regression model** that estimates pediatri
 - **Tabular branch:** A small Dense network encodes patient gender (0/1)
 - **Fusion head:** Both branches are concatenated and passed through fully connected layers to predict bone age
 
-The model also includes **Grad-CAM visualization** (`explainability.py`) to highlight which bone regions the model focuses on when making predictions.
+The model also includes **Grad-CAM visualization** (`src/gradcam.py`) to highlight which bone regions the model focuses on when making predictions, plus a spatial-shift sanity check to verify the attention map is anatomically grounded rather than fixed in image-space.
 
 ---
 
 ## 📦 Dataset
 
-**Source:** [RSNA Pediatric Bone Age Challenge — Kaggle](https://www.kaggle.com/datasets/kmader/rsna-bone-age)  
-**Task:** Continuous regression — predict bone age in **months**  
+**Source:** [RSNA Pediatric Bone Age Challenge — Kaggle](https://www.kaggle.com/datasets/kmader/rsna-bone-age)
+**Task:** Continuous regression — predict bone age in **months**
 **Format:** Grayscale PNG images, resized to 128×128 px (RGB for Xception compatibility)
 
-| Split      | Size   |
-|------------|--------|
-| Train      | ~10,088|
-| Validation | ~1,261 |
-| Test       | ~1,261 |
+| Split      | Size    |
+|------------|---------|
+| Train      | ~10,088 |
+| Validation | ~1,261  |
+| Test       | ~1,262  |
 
 > **Note:** The original Kaggle test set has no labels. The test split used here is carved from the training CSV via an 80/10/10 split using `train_test_split`.
 
@@ -42,7 +42,7 @@ Image Input (128, 128, 3)          Gender Input (1,)
   (ImageNet weights,                       │
    fully fine-tuned)                       │
         │                                  │
-GlobalMaxPooling2D (2048,)                 │
+GlobalAveragePooling2D (2048,)             │
         │                                  │
         └──────── Concatenate (2064,) ─────┘
                         │
@@ -51,17 +51,19 @@ GlobalMaxPooling2D (2048,)                 │
                Dense(1, linear)  →  Predicted Bone Age (months)
 ```
 
-| Detail               | Value                                   |
-|----------------------|-----------------------------------------|
-| Base Model           | Xception (ImageNet weights)             |
-| Fine-Tuning          | ✅ Full (`base_model.trainable = True`) |
-| Pooling              | GlobalMaxPooling2D                      |
-| Gender Encoding      | Dense(16, relu)                         |
-| Fusion               | Concatenate → Dense(32) → Dense(1)      |
-| Output Activation    | Linear (regression)                     |
-| Loss Function        | MSE                                     |
-| Metrics              | MAE                                     |
-| Total Parameters     | ~20.9M (79.83 MB)                       |
+| Detail               | Value                                       |
+|----------------------|----------------------------------------------|
+| Base Model           | Xception (ImageNet weights)                 |
+| Fine-Tuning          | ✅ Full (`base_model.trainable = True`)     |
+| Pooling              | **GlobalAveragePooling2D** *(updated — see note below)* |
+| Gender Encoding      | Dense(16, relu)                             |
+| Fusion               | Concatenate → Dense(32) → Dense(1)          |
+| Output Activation    | Linear (regression)                         |
+| Loss Function        | MSE                                         |
+| Metrics              | MAE                                         |
+| Total Parameters     | ~20.9M (79.83 MB)                           |
+
+> **Note:** Switched from `GlobalMaxPooling2D` to `GlobalAveragePooling2D` — better suited for Grad-CAM.
 
 ### Why Multi-Input?
 Gender is a clinically significant factor in bone development — bone maturation rates differ between males and females. Adding gender as a dedicated input branch (rather than ignoring it) gives the model direct access to this signal without forcing it to infer it from pixel data.
@@ -70,16 +72,24 @@ Gender is a clinically significant factor in bone development — bone maturatio
 
 ## ⚙️ Training Configuration
 
-| Hyperparameter     | Value                         |
-|--------------------|-------------------------------|
-| Optimizer          | Adam (lr = 0.0001)            |
-| Loss Function      | MSE                           |
-| Max Epochs         | 15                            |
-| **Actual Epochs**  | **14** (EarlyStopping triggered) |
-| Batch Size         | 32                            |
-| Image Size         | 128×128                       |
-| EarlyStopping      | patience=5, monitors val_loss, restores best weights |
-| ModelCheckpoint    | saves best val_loss only      |
+| Hyperparameter     | Value                                           |
+|--------------------|--------------------------------------------------|
+| Optimizer          | Adam (initial lr = 0.0001)                       |
+| Loss Function      | MSE                                              |
+| Max Epochs         | 30                                                |
+| Batch Size         | 32                                                |
+| Image Size         | 128×128                                           |
+| EarlyStopping      | patience=8, monitors val_loss, restores best weights |
+| ModelCheckpoint    | saves best val_loss only                          |
+| ReduceLROnPlateau  | factor=0.5, patience=3, min_lr=1e-6 *(added)*     |
+
+> **Why ReduceLROnPlateau?** Fixed LR plateaued at val MAE ≈ 12.75. Adding LR decay + more epochs improved it to **9.81 months**.
+
+---
+
+## 🩹 Preprocessing — Label/Marker Masking
+
+Many X-rays contain a fixed-position laterality marker (L/R label). Left unmasked, the model could learn it as a shortcut instead of using true bone structure. `mask_image()` blacks out these markers via OpenCV contour detection before training.
 
 ---
 
@@ -87,77 +97,66 @@ Gender is a clinically significant factor in bone development — bone maturatio
 
 Applied **only to training data** via `ImageDataGenerator`. Validation uses `preprocess_input` only (no augmentation).
 
-| Technique         | Value         |
-|-------------------|---------------|
-| Rotation          | ±20°          |
-| Zoom              | 15%           |
-| Horizontal Flip   | ✅ Enabled    |
-| Preprocessing     | `preprocess_input` (normalizes to [−1, 1]) |
+| Technique          | Value         |
+|---------------------|---------------|
+| Rotation            | ±20°          |
+| Height Shift        | 15%           |
+| **Width Shift**     | **15%** *(added — original config only shifted vertically)* |
+| Zoom                | 15%           |
+| Horizontal Flip     | ✅ Enabled    |
+| Preprocessing       | `preprocess_input` (normalizes to [−1, 1]) |
 
-> ⚠️ **No `rescale=1/255`** — Xception's `preprocess_input` already handles pixel normalization. Applying both would corrupt the input distribution.
+> No `rescale=1/255` — `preprocess_input` already normalizes pixels.
 
 ---
 
 ## 📊 Results
 
-### Training History
+### Final Training Metrics (Epoch 29-30)
 
-| Epoch | Train Loss (MSE) | Train MAE | Val Loss (MSE) | Val MAE  |
-|-------|-----------------|-----------|----------------|----------|
-| 1     | 1867.68         | 28.74     | 414.84         | 16.25    |
-| 2     | 388.63          | 15.54     | 357.53         | 14.67    |
-| 3     | 333.64          | 14.36     | 311.16         | 13.59    |
-| 4     | 306.19          | 13.82     | 269.53         | 12.97    |
-| 5     | 281.44          | 13.25     | 293.53         | 13.38    |
-| 6     | 267.94          | 12.86     | 326.95         | 14.43    |
-| 7     | 248.47          | 12.45     | 322.12         | 14.56    |
-| 8     | 232.39          | 12.01     | 237.26         | 11.99    |
-| 9     | 220.20          | 11.71     | 236.14         | **12.09** |
-| 10    | 209.22          | 11.39     | 268.90         | 12.96    |
-| 11    | 203.45          | 11.24     | 236.69         | 12.17    |
-| 12    | 187.49          | 10.78     | 300.56         | 13.95    |
-| 13    | 182.10          | 10.65     | 272.55         | 13.18    |
-| 14    | 171.89          | 10.31     | 329.51         | 14.47    |
+| Metric         | Value         |
+|----------------|---------------|
+| Train MAE      | 8.68 months   |
+| **Best Val MAE** | **9.81 months** |
+| Baseline MAE   | 13.00 months  |
+| Improvement    | **3.19 months** over baseline ✅ |
 
-> Best checkpoint: **Epoch 9** → Val MSE: **236.14**, Val MAE: **~12.09 months**
+### Bias Diagnosis Report (Test Set, n=1262)
 
-### Final Performance
+| Segment                          | Bias         | n    |
+|------------------------------------|--------------|------|
+| Global                              | **-1.44 months** | 1262 |
+| Children (< 72 months)              | +6.21 months | 140  |
+| Mid-Range (72–156 months)           | -1.83 months | 803  |
+| Adolescents & Older (> 156 months)  | -3.82 months | 319  |
 
-| Metric         | Value                    |
-|----------------|--------------------------|
-| Best Val MSE   | **236.14**               |
-| Best Val MAE   | **~12.09 months**        |
-| Baseline MAE   | 13.0 months (single-input Xception) |
-| Improvement    | **~0.91 months** over baseline ✅ |
+> Earlier checkpoint had a global bias of -6.60 months. Remaining weak spot: early-childhood segment (small sample size, n=140).
 
-Adding gender as a second input improved MAE by approximately **0.91 months** over the single-input baseline, confirming that multi-input fusion is beneficial.
+### Real vs. Predicted Scatter Plot
+
+The model tracks the y = x reference line closely across the 50–175 month range, with mild systematic deviation at the extreme ends of the age distribution — a typical "regression to the mean" pattern in continuous regression tasks.
+
+![Real vs Predicted](outputs/real_vs_pred_scatter.png)
 
 ---
 
-## 🔥 Grad-CAM Visualization
+## 🔥 Grad-CAM Visualization & Debugging Journey
 
-The project includes a Grad-CAM module (`explainability.py`) that overlays attention heatmaps on X-ray images to show which regions the model focuses on for each prediction.
+The project includes a Grad-CAM module (`src/gradcam.py`) that overlays attention heatmaps on X-ray images, plus a `shift_image()` sanity check that artificially displaces the X-ray to verify the heatmap moves correctly with the anatomy rather than staying fixed in image-space.
 
-### Figure — Grad-CAM Attention Map
-> *Example: Actual bone age 150 months → Predicted 144.8 months*
+**A real issue encountered during development:** early Grad-CAM outputs consistently highlighted a fixed region regardless of the actual bone structure. Three fixes resolved this:
 
-The model correctly focuses on the **carpal bones and metacarpal growth plates** — anatomically consistent with radiological bone age assessment. The attention map confirms the model has learned clinically meaningful features rather than image artifacts.
+1. `GlobalMaxPooling2D` → `GlobalAveragePooling2D` (avoided gradient collapse onto single artifact pixels)
+2. Masked laterality markers (removed a spatial shortcut)
+3. Switched the visualized layer from `block14_sepconv2_act` (4×4, blurry) to `block13_sepconv2_act` (8×8, sharper) — no retraining needed
+
+```python
+last_conv_layer = "block13_sepconv2_act"  # 8×8 — sharper than block14 (4×4)
+```
+
+After these fixes, Grad-CAM consistently localizes on **carpal bones and metacarpal growth plates** — anatomically consistent with radiological bone age assessment.
 
 ---
-
-### 🚀 Regression Performance Spectrum & Validation Report
-
-The regression evaluation module (`src/evaluation.py`) has been fully executed, creating a dynamic error analysis platform across the entire pediatric age spectrum.
-
-#### 📈 Key Findings & Performance Diagnosis:
-1. **Strong Linear Correlation:** The model tracks the diagonal $y = x$ reference line beautifully in the mid-range spectrum (75 to 160 months), proving a highly calibrated feature extraction process.
-2. **Boundary Systematic Bias (Regression to the Mean):**
-   - **Under 50 Months:** The model exhibits a minor *overprediction* bias due to data scarcity in early infant stages.
-   - **Over 180 Months:** The model exhibits an *underprediction* bias, pulling mature skeletal structures slightly toward the data distribution mean.
-3. **Artifact Serialization:** The diagnostic plot has been automatically exported and saved to `outputs/real_vs_pred_scatter.png` at 300 DPI for production reporting.
-
-**Status:** Acceptance criteria completely fulfilled. The regression breakdown is successfully mapped. Closing this issue.
-
 
 ## 🗂️ Project Structure
 
@@ -166,21 +165,18 @@ The regression evaluation module (`src/evaluation.py`) has been fully executed, 
 ├── src/
 │   ├── main.py                    # Training pipeline entry point
 │   ├── models_architecture.py     # Multi-input Xception model definition
-│   ├── dataset.py                 # Data loading, preprocessing, generators
-│   ├── explainability.py          # Grad-CAM heatmap visualization
+│   ├── dataset.py                 # Data loading, masking, preprocessing, generators
+│   ├── evaluation.py              # Test-set evaluation + bias diagnosis report
+│   ├── gradcam.py                 # Grad-CAM heatmap visualization + spatial-shift sanity check
 │   └── models/
-│       └── best_xception_multi_input.h5  # Best checkpoint (saved during training)
-├── bonage_dataset/
+│       └── best_xception_multi_input.h5  # Best checkpoint (gitignored — not tracked)
+├── bonage_dataset/                # gitignored — download separately from Kaggle
 │   ├── boneage-training-dataset/
-│   ├── boneage-test-dataset/
 │   ├── boneage-training-dataset.csv
-│   ├── boneage-test-dataset.csv
 │   └── df_test_split.csv          # Auto-generated test split after training
-├── Images/
-│   ├── Prediction_Results.png
-│   ├── Sample_Hand_XRay.png
-│   └── sample_xray.png
-├── main.py                        # Root-level entry point
+├── outputs/
+│   ├── real_vs_pred_scatter.png
+│   └── gradcam_results/
 ├── requirements.txt
 ├── .gitignore
 └── README.md
@@ -205,49 +201,40 @@ bonage_dataset/
 ├── boneage-training-dataset/
 │   ├── 1377.png
 │   └── ...
-├── boneage-training-dataset.csv
-└── boneage-test-dataset.csv
+└── boneage-training-dataset.csv
 ```
 
 ### Train
 
 ```bash
-python src/main.py
+python -m src.main
 ```
 
-Training will print a **Baseline Comparison Report** at the end, comparing the multi-input model's best val MAE against the 13.0-month single-input baseline.
+Prints a **Baseline Comparison Report** at the end, comparing the multi-input model's best val MAE against the 13.0-month single-input baseline.
+
+### Evaluate
+
+```bash
+python -m src.evaluation
+```
+
+Generates the real-vs-predicted scatter plot and the age-segmented bias diagnosis report on the held-out test split.
 
 ### Grad-CAM Inference
 
 ```bash
-python src/explainability.py
+python -m src.gradcam
 ```
 
-Randomly selects a test sample from `df_test_split.csv` and displays the original X-ray alongside its Grad-CAM attention map.
+Randomly selects a test sample, displays the original X-ray alongside its Grad-CAM attention map, and runs a spatial-shift sanity check to confirm the heatmap is anatomically grounded rather than fixed in image-space.
 
 ---
 
 ## ⚠️ Known Limitations
 
-**Image resolution trade-off** — 128×128 was used to reduce training time. Upscaling to 256×256 with a GPU may recover fine-grained spatial detail (subtle growth plate features) and improve accuracy.
-
-**Minimal fusion head** — The head uses `Dense(32) → Dense(1)`. A larger head (`Dense(256) → Dense(64) → Dense(1)`) may better map the 2064-dim fused representation to continuous bone age values.
-
-**Large epoch-1 loss spike** — Training all Xception weights from scratch causes a large initial loss (MSE ~1867). Gradual fine-tuning (freeze base → train head → unfreeze) would reduce this instability.
-
-**MSE as loss** — MSE heavily penalizes outliers. Switching to MAE as the loss function may produce more clinically stable results, especially for extreme age values.
-
----
-
-## 🔧 Suggested Next Steps
-
-1. **Increase image resolution** to 256×256 with GPU for richer spatial features
-2. **Gradual fine-tuning** — train head first with frozen base, then unfreeze Xception layer by layer
-3. **Larger regression head** — `Dense(256) → Dense(64) → Dense(1)` for richer feature mapping
-4. **MAE loss** — more robust to outlier age samples than MSE
-5. **Test set evaluation** — use saved `df_test_split.csv` to measure final held-out performance with the best checkpoint
-
----
+- **Image resolution trade-off** — 128×128 was used to reduce training time. Upscaling to 224×224 would also increase the Grad-CAM feature-map resolution (currently 8×8 at `block13`) and may further improve accuracy.
+- **Early-childhood bias** — the model still overpredicts in the <72 month segment, likely due to limited sample size in that range.
+- **Minimal fusion head** — `Dense(32) → Dense(1)`. A larger head may better map the 2064-dim fused representation to continuous bone age values.
 
 ## 🛠️ Tech Stack
 
